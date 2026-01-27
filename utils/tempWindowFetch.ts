@@ -1,3 +1,4 @@
+import { RuntimeActionIds } from "~/constants/runtimeActions"
 import {
   handleTempWindowFetch,
   handleTempWindowGetRenderedTitle,
@@ -30,7 +31,13 @@ import {
 } from "~/utils/browser"
 import { sendRuntimeMessage } from "~/utils/browserApi"
 import { safeRandomUUID } from "~/utils/identifier"
+import { createLogger } from "~/utils/logger"
 import { isProtectionBypassFirefoxEnv } from "~/utils/protectionBypass"
+
+/**
+ * Unified logger scoped to temp window fetch helpers and fallback behavior.
+ */
+const logger = createLogger("TempWindowFetch")
 
 export type TempWindowResponseType = "json" | "text" | "arrayBuffer" | "blob"
 
@@ -106,7 +113,7 @@ export async function tempWindowFetch(
     })
   }
   return await sendRuntimeMessage({
-    action: "tempWindowFetch",
+    action: RuntimeActionIds.TempWindowFetch,
     ...payload,
   })
 }
@@ -120,7 +127,7 @@ export async function tempWindowGetRenderedTitle(params: {
   suppressMinimize?: boolean
 }): Promise<TempWindowRenderedTitleResponse> {
   const payload = {
-    action: "tempWindowGetRenderedTitle",
+    action: RuntimeActionIds.TempWindowGetRenderedTitle,
     ...params,
     suppressMinimize:
       params.suppressMinimize ??
@@ -195,17 +202,16 @@ function logSkipTempWindowFallback(
   extra?: Record<string, unknown>,
 ): void {
   try {
-    const location = context.endpoint
-      ? `endpoint "${context.endpoint}"`
-      : `url ${context.url}`
-
-    const base = `[API Service] Temp window fallback skipped for ${location}: ${message}`
-
-    if (extra && Object.keys(extra).length > 0) {
-      console.log(base, extra)
-    } else {
-      console.log(base)
-    }
+    logger.debug("Temp window fallback skipped", {
+      reason: message,
+      endpoint: context.endpoint,
+      url: context.url,
+      baseUrl: context.baseUrl,
+      responseType: context.responseType,
+      onlyData: context.onlyData,
+      authType: context.authType,
+      ...(extra && Object.keys(extra).length > 0 ? { extra } : null),
+    })
   } catch {
     // ignore logging errors
   }
@@ -440,11 +446,19 @@ async function fetchViaTempWindow<T>(
     cookieAuthSessionCookie: context.cookieAuthSessionCookie,
   }
 
-  console.log("[API Service] Using temp window fetch fallback for", context.url)
+  logger.info("Using temp window fetch fallback", {
+    endpoint: context.endpoint,
+    url: context.url,
+  })
 
   const response = await tempWindowFetch(payload)
 
-  console.log("[API Service] Temp window fetch response:", response)
+  logger.debug("Temp window fetch response received", {
+    endpoint: context.endpoint,
+    url: context.url,
+    success: response.success,
+    status: response.status,
+  })
 
   if (!response.success) {
     throw new ApiError(

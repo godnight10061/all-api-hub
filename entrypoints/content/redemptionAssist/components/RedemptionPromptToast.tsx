@@ -11,7 +11,14 @@ import {
   Heading3,
   Link,
 } from "~/components/ui"
+import { RuntimeActionIds } from "~/constants/runtimeActions"
 import { sendRuntimeMessage } from "~/utils/browserApi"
+import { createLogger } from "~/utils/logger"
+
+/**
+ * Unified logger scoped to redemption assist prompt toast interactions.
+ */
+const logger = createLogger("RedemptionPromptToast")
 
 export type RedemptionPromptAction = "auto" | "cancel"
 
@@ -71,10 +78,10 @@ export const RedemptionPromptToast: React.FC<RedemptionPromptToastProps> = ({
     e.preventDefault()
     try {
       await sendRuntimeMessage({
-        action: "openSettings:checkinRedeem",
+        action: RuntimeActionIds.OpenSettingsCheckinRedeem,
       })
     } catch (error) {
-      console.error("[RedemptionAssist] Failed to open settings page:", error)
+      logger.error("Failed to open settings page", error)
     }
   }
 

@@ -9,6 +9,7 @@
  */
 import { t } from "i18next"
 
+import { RuntimeActionIds } from "~/constants/runtimeActions"
 import { AuthTypeEnum } from "~/types"
 import {
   getActiveOrAllTabs,
@@ -16,9 +17,15 @@ import {
   sendRuntimeMessage,
 } from "~/utils/browserApi"
 import { getErrorMessage } from "~/utils/error"
+import { createLogger } from "~/utils/logger"
 
 import { getApiService } from "./apiService"
 import { getSiteType } from "./detectSiteType"
+
+/**
+ * Unified logger scoped to the account auto-detection service.
+ */
+const logger = createLogger("AutoDetectService")
 
 export interface AutoDetectResult {
   success: boolean
@@ -111,7 +118,7 @@ async function getUserDataViaAPI(url: string): Promise<UserDataResult | null> {
       user: userInfo,
     }
   } catch (error) {
-    console.error("[AutoDetect] API 方式获取用户数据失败:", error)
+    logger.error("API 方式获取用户数据失败", error)
     return null
   }
 }
@@ -125,7 +132,7 @@ async function getUserDataViaAPI(url: string): Promise<UserDataResult | null> {
  * 3) Detect site type and return unified result
  */
 export async function autoDetectDirect(url: string): Promise<AutoDetectResult> {
-  console.log("[AutoDetect] 使用直接方式")
+  logger.debug("使用直接方式", { url })
 
   // 1. 通过 API 获取用户数据
   const userData = await getUserDataViaAPI(url)
@@ -148,7 +155,7 @@ async function getUserDataViaBackground(
   try {
     const requestId = `auto-detect-${Date.now()}`
     const response = await sendRuntimeMessage({
-      action: "autoDetectSite",
+      action: RuntimeActionIds.AutoDetectSite,
       url: url,
       requestId: requestId,
     })
@@ -176,7 +183,7 @@ async function getUserDataViaBackground(
       user: response.data.user,
     }
   } catch (error) {
-    console.error("[AutoDetect] Background 方式获取用户数据失败:", error)
+    logger.error("Background 方式获取用户数据失败", error)
     return null
   }
 }
@@ -190,7 +197,7 @@ async function getUserDataViaBackground(
 export async function autoDetectViaBackground(
   url: string,
 ): Promise<AutoDetectResult> {
-  console.log("[AutoDetect] 使用 Background 方式")
+  logger.debug("使用 Background 方式", { url })
 
   // 1. 通过 Background 获取用户数据
   const userData = await getUserDataViaBackground(url)
@@ -212,7 +219,7 @@ async function getUserDataFromCurrentTab(
     const tabs = await getActiveTabs()
 
     if (!tabs || tabs.length === 0 || !tabs[0]?.id) {
-      console.log("[AutoDetect] 无法获取当前标签页")
+      logger.warn("无法获取当前标签页", { url })
       return null
     }
 
@@ -220,7 +227,7 @@ async function getUserDataFromCurrentTab(
 
     // 2. 通过 content script 获取用户信息
     const userResponse = await browser.tabs.sendMessage(tabId, {
-      action: "getUserFromLocalStorage",
+      action: RuntimeActionIds.ContentGetUserFromLocalStorage,
       url: url,
     })
 
@@ -247,7 +254,7 @@ async function getUserDataFromCurrentTab(
       user: userResponse.data.user,
     }
   } catch (error) {
-    console.error("[AutoDetect] 从当前标签页获取用户数据失败:", error)
+    logger.error("从当前标签页获取用户数据失败", error)
     return null
   }
 }
@@ -261,7 +268,7 @@ async function getUserDataFromCurrentTab(
 export async function autoDetectFromCurrentTab(
   url: string,
 ): Promise<AutoDetectResult> {
-  console.log("[AutoDetect] 使用当前标签页方式")
+  logger.debug("使用当前标签页方式", { url })
 
   // 1. 从当前标签页获取用户数据
   const userData = await getUserDataFromCurrentTab(url)
@@ -294,12 +301,15 @@ export async function autoDetectSmart(url: string): Promise<AutoDetectResult> {
         const targetUrl = new URL(url)
 
         if (currentUrl.origin === targetUrl.origin) {
-          console.log("[AutoDetect] 当前标签页匹配目标站点，使用当前标签页方式")
+          logger.debug("当前标签页匹配目标站点，使用当前标签页方式", {
+            url,
+            currentTabUrl: currentTab.url,
+          })
           return await autoDetectFromCurrentTab(url)
         }
       }
     } catch (error) {
-      console.warn("[AutoDetect] 当前标签页方式失败，尝试其他方式", error)
+      logger.warn("当前标签页方式失败，尝试其他方式", error)
     }
   }
 
@@ -310,7 +320,7 @@ export async function autoDetectSmart(url: string): Promise<AutoDetectResult> {
     if (result.success) {
       return result
     }
-    console.log("[AutoDetect] Background 方式失败，降级到直接方式")
+    logger.debug("Background 方式失败，降级到直接方式", { url })
   }
 
   // 3. Fallback: 使用直接方式（手机 或其他方式失败）

@@ -12,15 +12,21 @@ import {
   Input,
   Switch,
 } from "~/components/ui"
-import { useUserPreferencesContext } from "~/contexts/UserPreferencesContext"
 import { MENU_ITEM_IDS } from "~/constants/optionsMenuIds"
+import { useUserPreferencesContext } from "~/contexts/UserPreferencesContext"
 import { DEFAULT_PREFERENCES } from "~/services/userPreferences"
 import {
   AUTO_CHECKIN_SCHEDULE_MODE,
   AutoCheckinPreferences,
   AutoCheckinScheduleMode,
 } from "~/types/autoCheckin"
+import { createLogger } from "~/utils/logger"
 import { navigateWithinOptionsPage } from "~/utils/navigation"
+
+/**
+ * Unified logger scoped to the Basic Settings auto check-in section.
+ */
+const logger = createLogger("AutoCheckinSettings")
 
 /**
  * Basic settings panel for configuring auto check-in (window, schedule, retries, navigation).
@@ -66,7 +72,7 @@ export default function AutoCheckinSettings() {
         toast.error(t("settings:messages.saveSettingsFailed"))
       }
     } catch (error) {
-      console.error("Failed to save preferences:", error)
+      logger.error("Failed to save preferences", error)
       toast.error(t("settings:messages.saveSettingsFailed"))
     } finally {
       setIsSaving(false)
@@ -162,6 +168,21 @@ export default function AutoCheckinSettings() {
                 checked={preferences.globalEnabled}
                 onChange={(checked) =>
                   savePreferences({ globalEnabled: checked })
+                }
+                disabled={isSaving}
+              />
+            }
+          />
+
+          {/* UI-open daily pre-trigger */}
+          <CardItem
+            title={t("autoCheckin:settings.pretriggerDailyOnUiOpen")}
+            description={t("autoCheckin:settings.pretriggerDailyOnUiOpenDesc")}
+            rightContent={
+              <Switch
+                checked={preferences.pretriggerDailyOnUiOpen}
+                onChange={(checked) =>
+                  savePreferences({ pretriggerDailyOnUiOpen: checked })
                 }
                 disabled={isSaving}
               />

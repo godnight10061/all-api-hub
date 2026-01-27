@@ -6,6 +6,7 @@ import toast from "react-hot-toast"
 import { useTranslation } from "react-i18next"
 
 import { Button, EmptyState, Input } from "~/components/ui"
+import { RuntimeActionIds } from "~/constants/runtimeActions"
 import { PageHeader } from "~/entrypoints/options/components/PageHeader"
 import type { ManagedSiteChannel } from "~/types/managedSite"
 import type {
@@ -14,6 +15,7 @@ import type {
   ExecutionResult,
 } from "~/types/managedSiteModelSync"
 import { sendRuntimeMessage } from "~/utils/browserApi"
+import { createLogger } from "~/utils/logger"
 
 import ActionBar from "./components/ActionBar"
 import EmptyResults from "./components/EmptyResults"
@@ -23,6 +25,11 @@ import OverviewCard from "./components/OverviewCard"
 import ProgressCard from "./components/ProgressCard"
 import ResultsTable from "./components/ResultsTable"
 import StatisticsCard from "./components/StatisticsCard"
+
+/**
+ * Unified logger scoped to the Managed Site model sync options dashboard.
+ */
+const logger = createLogger("ManagedSiteModelSyncPage")
 
 const TAB_INDEX = {
   history: 0,
@@ -77,14 +84,14 @@ export default function ManagedSiteModelSync({
     try {
       setIsLoading(true)
       const response = await sendRuntimeMessage({
-        action: "modelSync:getLastExecution",
+        action: RuntimeActionIds.ModelSyncGetLastExecution,
       })
 
       if (response.success) {
         setLastExecution(response.data)
       }
     } catch (error) {
-      console.error("Failed to load last execution:", error)
+      logger.error("Failed to load last execution", error)
     } finally {
       setIsLoading(false)
     }
@@ -93,35 +100,35 @@ export default function ManagedSiteModelSync({
   const loadProgress = useCallback(async () => {
     try {
       const response = await sendRuntimeMessage({
-        action: "modelSync:getProgress",
+        action: RuntimeActionIds.ModelSyncGetProgress,
       })
 
       if (response.success) {
         setProgress(response.data)
       }
     } catch (error) {
-      console.error("Failed to load progress:", error)
+      logger.error("Failed to load progress", error)
     }
   }, [])
 
   const loadNextRun = useCallback(async () => {
     try {
       const response = await sendRuntimeMessage({
-        action: "modelSync:getNextRun",
+        action: RuntimeActionIds.ModelSyncGetNextRun,
       })
 
       if (response.success) {
         setNextScheduledAt(response.data?.nextScheduledAt ?? null)
       }
     } catch (error) {
-      console.error("Failed to load next run:", error)
+      logger.error("Failed to load next run", error)
     }
   }, [])
 
   const loadPreferences = useCallback(async () => {
     try {
       const response = await sendRuntimeMessage({
-        action: "modelSync:getPreferences",
+        action: RuntimeActionIds.ModelSyncGetPreferences,
       })
 
       if (response.success) {
@@ -129,7 +136,7 @@ export default function ManagedSiteModelSync({
         setIntervalMs(response.data?.intervalMs)
       }
     } catch (error) {
-      console.error("Failed to load preferences:", error)
+      logger.error("Failed to load preferences", error)
     }
   }, [])
 
@@ -138,7 +145,7 @@ export default function ManagedSiteModelSync({
       setIsChannelsLoading(true)
       setChannelsError(null)
       const response = await sendRuntimeMessage({
-        action: "modelSync:listChannels",
+        action: RuntimeActionIds.ModelSyncListChannels,
       })
 
       if (response.success) {
@@ -277,7 +284,7 @@ export default function ManagedSiteModelSync({
   const handleRunAll = async () => {
     try {
       const response = await sendRuntimeMessage({
-        action: "modelSync:triggerAll",
+        action: RuntimeActionIds.ModelSyncTriggerAll,
       })
 
       if (response.success) {
@@ -307,7 +314,7 @@ export default function ManagedSiteModelSync({
 
     try {
       const response = await sendRuntimeMessage({
-        action: "modelSync:triggerSelected",
+        action: RuntimeActionIds.ModelSyncTriggerSelected,
         channelIds: Array.from(selectedSet),
       })
 
@@ -335,7 +342,7 @@ export default function ManagedSiteModelSync({
   const handleRetryFailed = async () => {
     try {
       const response = await sendRuntimeMessage({
-        action: "modelSync:triggerFailedOnly",
+        action: RuntimeActionIds.ModelSyncTriggerFailedOnly,
       })
 
       if (response.success) {
@@ -365,7 +372,7 @@ export default function ManagedSiteModelSync({
     setRunningChannelId(channelId)
     try {
       const response = await sendRuntimeMessage({
-        action: "modelSync:triggerSelected",
+        action: RuntimeActionIds.ModelSyncTriggerSelected,
         channelIds: [channelId],
       })
 

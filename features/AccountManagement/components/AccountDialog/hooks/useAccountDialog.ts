@@ -9,6 +9,7 @@ import {
   autoDetectAccount,
   getSiteName,
   isValidAccount,
+  parseManualQuotaFromUsd,
   validateAndSaveAccount,
   validateAndUpdateAccount,
 } from "~/services/accountOperations"
@@ -24,8 +25,14 @@ import {
   onTabUpdated,
   sendRuntimeMessage,
 } from "~/utils/browserApi"
+import { createLogger } from "~/utils/logger"
 
 const AUTO_DETECT_SLOW_HINT_DELAY_MS = 10_000
+
+/**
+ * Logger scoped to the account dialog lifecycle. Ensure we never include raw tokens/cookies in log details.
+ */
+const logger = createLogger("AccountDialogHook")
 
 interface UseAccountDialogProps {
   mode: DialogMode
@@ -71,6 +78,7 @@ export function useAccountDialog({
     mode === DIALOG_MODES.EDIT,
   )
   const [exchangeRate, setExchangeRate] = useState("")
+  const [manualBalanceUsd, setManualBalanceUsd] = useState("")
   const [currentTabUrl, setCurrentTabUrl] = useState<string | null>(null)
   const [notes, setNotes] = useState("")
   const [tagIds, setTagIds] = useState<string[]>([])
@@ -113,6 +121,7 @@ export function useAccountDialog({
     setDetectionError(null)
     setShowManualForm(mode === DIALOG_MODES.EDIT)
     setExchangeRate("")
+    setManualBalanceUsd("")
     setCurrentTabUrl(null)
     setNotes("")
     setTagIds([])
@@ -148,6 +157,7 @@ export function useAccountDialog({
           setAccessToken(siteAccount.account_info.access_token)
           setUserId(siteAccount.account_info.id.toString())
           setExchangeRate(siteAccount.exchange_rate.toString())
+          setManualBalanceUsd(siteAccount.manualBalanceUsd ?? "")
           setNotes(siteAccount.notes || "")
           setTagIds(siteAccount.tagIds || [])
           setCheckIn({
@@ -177,7 +187,7 @@ export function useAccountDialog({
           )
         }
       } catch (error) {
-        console.error(t("messages.loadFailed"), error)
+        logger.error("Failed to load account data", { error, accountId })
         toast.error(t("messages.loadFailed"))
       }
     },
@@ -204,17 +214,16 @@ export function useAccountDialog({
           setCurrentTabUrl(baseUrl)
           setSiteName(await getSiteName(tab))
         } catch (error) {
-          console.log(
-            t("messages.urlParseError", {
-              error: (error as Error).message,
-            }),
-          )
+          logger.warn("Failed to parse current tab URL", {
+            error,
+            tabUrl: tab.url,
+          })
           setCurrentTabUrl(null)
           setSiteName("")
         }
       }
     } catch (error) {
-      console.error(error)
+      logger.warn("Failed to query current tab, falling back", { error })
       // Fallback for Firefox Android
       try {
         const tabs = await browser.tabs.query({ active: true })
@@ -228,10 +237,12 @@ export function useAccountDialog({
           }
         }
       } catch (fallbackError) {
-        console.log("Failed to get current tab:", fallbackError)
+        logger.warn("Failed to query current tab in fallback mode", {
+          error: fallbackError,
+        })
       }
     }
-  }, [account, mode, t])
+  }, [account, mode])
 
   useEffect(() => {
     if (isOpen) {
@@ -243,7 +254,7 @@ export function useAccountDialog({
         checkCurrentTab()
       }
     }
-  }, [isOpen, mode, account, resetForm, loadAccountData, t, checkCurrentTab])
+  }, [isOpen, mode, account, resetForm, loadAccountData, checkCurrentTab])
 
   useEffect(() => {
     // 打开 popup 时立即检测一次
@@ -318,7 +329,7 @@ export function useAccountDialog({
         toast.error(t("messages.importCookiesEmpty"))
       }
     } catch (error) {
-      console.error("Failed to import cookies:", error)
+      logger.warn("Failed to import cookies", { error, url: url.trim() })
       toast.error(t("messages.importCookiesPermissionDenied"))
     } finally {
       setIsImportingCookies(false)
@@ -396,7 +407,10 @@ export function useAccountDialog({
               setCookieAuthSessionCookie(header)
             }
           } catch (error) {
-            console.warn("[AccountDialog] Auto import cookie failed:", error)
+            logger.warn("Auto-import cookie failed", {
+              error,
+              url: url.trim(),
+            })
           }
         }
 
@@ -407,7 +421,7 @@ export function useAccountDialog({
         }
       }
     } catch (error) {
-      console.error(t("messages.autoDetectFailed"), error)
+      logger.error("Auto-detect failed", { error, url: url.trim(), authType })
       setDetectionError(analyzeAutoDetectError(error))
       setShowManualForm(true)
     } finally {
@@ -433,6 +447,7 @@ export function useAccountDialog({
               siteType,
               authType,
               cookieAuthSessionCookie.trim(),
+              manualBalanceUsd,
             )
           : await validateAndUpdateAccount(
               account!.id,
@@ -448,6 +463,7 @@ export function useAccountDialog({
               siteType,
               authType,
               cookieAuthSessionCookie.trim(),
+              manualBalanceUsd,
             )
 
       if (result.success) {
@@ -523,7 +539,7 @@ export function useAccountDialog({
           error: getErrorMessage(error),
         }),
       )
-      console.error(error)
+      logger.error("Auto configuration failed", { error })
     } finally {
       setIsAutoConfiguring(false)
     }
@@ -536,7 +552,7 @@ export function useAccountDialog({
         const baseUrl = `${urlObj.protocol}//${urlObj.host}`
         setUrl(baseUrl)
       } catch (error) {
-        console.error(error)
+        logger.warn("Failed to normalize URL input", { error, url: newUrl })
         setUrl(newUrl)
       }
     } else {
@@ -566,6 +582,9 @@ export function useAccountDialog({
     cookieAuthSessionCookie,
     exchangeRate,
   })
+  const isManualBalanceUsdInvalid =
+    manualBalanceUsd.trim() !== "" &&
+    parseManualQuotaFromUsd(manualBalanceUsd) === undefined
 
   return {
     state: {
@@ -582,13 +601,15 @@ export function useAccountDialog({
       detectionError,
       showManualForm,
       exchangeRate,
+      manualBalanceUsd,
+      isManualBalanceUsdInvalid,
       currentTabUrl,
       notes,
       tagIds,
       checkIn,
       siteType,
       authType,
-      isFormValid,
+      isFormValid: isFormValid && !isManualBalanceUsdInvalid,
       isAutoConfiguring,
       cookieAuthSessionCookie,
       isImportingCookies,
@@ -602,6 +623,7 @@ export function useAccountDialog({
       setShowAccessToken,
       setShowManualForm,
       setExchangeRate,
+      setManualBalanceUsd,
       setNotes,
       setTagIds,
       setCheckIn,

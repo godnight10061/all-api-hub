@@ -8,6 +8,7 @@ import {
 } from "react"
 
 import { DATA_TYPE_CASHFLOW } from "~/constants"
+import { RuntimeActionIds } from "~/constants/runtimeActions"
 import { NEW_API, type ManagedSiteType } from "~/constants/siteType"
 import { UI_CONSTANTS } from "~/constants/ui"
 import {
@@ -25,12 +26,16 @@ import type {
   SortOrder,
 } from "~/types"
 import type { AutoCheckinPreferences } from "~/types/autoCheckin"
+import type { LogLevel } from "~/types/logging"
 import type { ModelRedirectPreferences } from "~/types/managedSiteModelRedirect"
 import type { SortingPriorityConfig } from "~/types/sorting"
 import type { ThemeMode } from "~/types/theme"
 import { deepOverride } from "~/utils"
 import { sendRuntimeMessage } from "~/utils/browserApi"
+import { createLogger } from "~/utils/logger"
 import { DEFAULT_SORTING_PRIORITY_CONFIG } from "~/utils/sortingPriority"
+
+const logger = createLogger("UserPreferencesContext")
 
 type UserManagedSiteModelSyncConfig = NonNullable<
   UserPreferences["managedSiteModelSync"]
@@ -62,6 +67,8 @@ interface UserPreferencesContextType {
   claudeCodeRouterBaseUrl: string
   claudeCodeRouterApiKey: string
   themeMode: ThemeMode
+  loggingConsoleEnabled: boolean
+  loggingLevel: LogLevel
   tempWindowFallback: TempWindowFallbackPreferences
   tempWindowFallbackReminder: TempWindowFallbackReminderPreferences
 
@@ -94,6 +101,8 @@ interface UserPreferencesContextType {
   updateClaudeCodeRouterBaseUrl: (url: string) => Promise<boolean>
   updateClaudeCodeRouterApiKey: (key: string) => Promise<boolean>
   updateThemeMode: (themeMode: ThemeMode) => Promise<boolean>
+  updateLoggingConsoleEnabled: (enabled: boolean) => Promise<boolean>
+  updateLoggingLevel: (level: LogLevel) => Promise<boolean>
   updateAutoCheckin: (
     updates: Partial<AutoCheckinPreferences>,
   ) => Promise<boolean>
@@ -125,6 +134,7 @@ interface UserPreferencesContextType {
   resetModelRedirectConfig: () => Promise<boolean>
   resetWebdavConfig: () => Promise<boolean>
   resetThemeAndLanguage: () => Promise<boolean>
+  resetLoggingSettings: () => Promise<boolean>
   resetSortingPriorityConfig: () => Promise<boolean>
   loadPreferences: () => Promise<void>
 }
@@ -156,7 +166,7 @@ export const UserPreferencesProvider = ({
       const prefs = await userPreferences.getPreferences()
       setPreferences(prefs)
     } catch (error) {
-      console.error("加载用户偏好设置失败:", error)
+      logger.error("加载用户偏好设置失败", error)
     } finally {
       setIsLoading(false)
     }
@@ -194,7 +204,7 @@ export const UserPreferencesProvider = ({
         )
 
         await sendRuntimeMessage({
-          action: "preferences:updateActionClickBehavior",
+          action: RuntimeActionIds.PreferencesUpdateActionClickBehavior,
           behavior,
         })
       }
@@ -360,7 +370,7 @@ export const UserPreferencesProvider = ({
     if (success) {
       setPreferences((prev) => (prev ? deepOverride(prev, updates) : null))
       sendRuntimeMessage({
-        action: "updateAutoRefreshSettings",
+        action: RuntimeActionIds.AutoRefreshUpdateSettings,
         settings: updates,
       })
     }
@@ -375,7 +385,7 @@ export const UserPreferencesProvider = ({
     if (success) {
       setPreferences((prev) => (prev ? deepOverride(prev, updates) : null))
       sendRuntimeMessage({
-        action: "updateAutoRefreshSettings",
+        action: RuntimeActionIds.AutoRefreshUpdateSettings,
         settings: updates,
       })
     }
@@ -390,7 +400,7 @@ export const UserPreferencesProvider = ({
     if (success) {
       setPreferences((prev) => (prev ? deepOverride(prev, updates) : null))
       sendRuntimeMessage({
-        action: "updateAutoRefreshSettings",
+        action: RuntimeActionIds.AutoRefreshUpdateSettings,
         settings: updates,
       })
     }
@@ -405,7 +415,7 @@ export const UserPreferencesProvider = ({
     if (success) {
       setPreferences((prev) => (prev ? deepOverride(prev, updates) : null))
       sendRuntimeMessage({
-        action: "updateAutoRefreshSettings",
+        action: RuntimeActionIds.AutoRefreshUpdateSettings,
         settings: updates,
       })
     }
@@ -499,6 +509,26 @@ export const UserPreferencesProvider = ({
     return success
   }, [])
 
+  const updateLoggingConsoleEnabled = useCallback(async (enabled: boolean) => {
+    const updates = { logging: { consoleEnabled: enabled } }
+    const success = await userPreferences.updateLoggingPreferences({
+      consoleEnabled: enabled,
+    })
+    if (success) {
+      setPreferences((prev) => (prev ? deepOverride(prev, updates) : null))
+    }
+    return success
+  }, [])
+
+  const updateLoggingLevel = useCallback(async (level: LogLevel) => {
+    const updates = { logging: { level } }
+    const success = await userPreferences.updateLoggingPreferences({ level })
+    if (success) {
+      setPreferences((prev) => (prev ? deepOverride(prev, updates) : null))
+    }
+    return success
+  }, [])
+
   const updateAutoCheckin = useCallback(
     async (updates: Partial<AutoCheckinPreferences>) => {
       const success = await userPreferences.savePreferences({
@@ -520,7 +550,7 @@ export const UserPreferencesProvider = ({
 
         // Notify background to update alarm
         await sendRuntimeMessage({
-          action: "autoCheckin:updateSettings",
+          action: RuntimeActionIds.AutoCheckinUpdateSettings,
           settings: updates,
         })
       }
@@ -562,7 +592,7 @@ export const UserPreferencesProvider = ({
 
         // Notify background to update alarm
         await sendRuntimeMessage({
-          action: "modelSync:updateSettings",
+          action: RuntimeActionIds.ModelSyncUpdateSettings,
           settings: updates,
         })
       }
@@ -626,7 +656,7 @@ export const UserPreferencesProvider = ({
         })
 
         await sendRuntimeMessage({
-          action: "redemptionAssist:updateSettings",
+          action: RuntimeActionIds.RedemptionAssistUpdateSettings,
           settings: updates,
         })
       }
@@ -679,14 +709,14 @@ export const UserPreferencesProvider = ({
 
       // Notify auto-refresh service
       sendRuntimeMessage({
-        action: "updateAutoRefreshSettings",
+        action: RuntimeActionIds.AutoRefreshUpdateSettings,
         settings: { accountAutoRefresh: defaults.accountAutoRefresh },
       })
 
       // Notify auto-checkin service
       if (defaults.autoCheckin) {
         void sendRuntimeMessage({
-          action: "autoCheckin:updateSettings",
+          action: RuntimeActionIds.AutoCheckinUpdateSettings,
           settings: defaults.autoCheckin,
         })
       }
@@ -694,7 +724,7 @@ export const UserPreferencesProvider = ({
       // Notify New API model sync service
       if (defaults.managedSiteModelSync) {
         void sendRuntimeMessage({
-          action: "modelSync:updateSettings",
+          action: RuntimeActionIds.ModelSyncUpdateSettings,
           settings: defaults.managedSiteModelSync,
         })
       }
@@ -734,7 +764,7 @@ export const UserPreferencesProvider = ({
           : prev,
       )
       sendRuntimeMessage({
-        action: "updateAutoRefreshSettings",
+        action: RuntimeActionIds.AutoRefreshUpdateSettings,
         settings: { accountAutoRefresh: defaults },
       })
     }
@@ -787,7 +817,7 @@ export const UserPreferencesProvider = ({
       )
       if (defaults) {
         void sendRuntimeMessage({
-          action: "modelSync:updateSettings",
+          action: RuntimeActionIds.ModelSyncUpdateSettings,
           settings: defaults,
         })
       }
@@ -825,7 +855,7 @@ export const UserPreferencesProvider = ({
       )
       if (defaults) {
         void sendRuntimeMessage({
-          action: "autoCheckin:updateSettings",
+          action: RuntimeActionIds.AutoCheckinUpdateSettings,
           settings: defaults,
         })
       }
@@ -847,7 +877,7 @@ export const UserPreferencesProvider = ({
       )
       if (defaults) {
         void sendRuntimeMessage({
-          action: "redemptionAssist:updateSettings",
+          action: RuntimeActionIds.RedemptionAssistUpdateSettings,
           settings: defaults,
         })
       }
@@ -905,6 +935,19 @@ export const UserPreferencesProvider = ({
     return success
   }, [])
 
+  const resetLoggingSettings = useCallback(async () => {
+    const defaults = DEFAULT_PREFERENCES.logging
+    const success = await userPreferences.updateLoggingPreferences(defaults)
+    if (success) {
+      setPreferences((prev) =>
+        prev
+          ? deepOverride(prev, { logging: defaults, lastUpdated: Date.now() })
+          : prev,
+      )
+    }
+    return success
+  }, [])
+
   const resetSortingPriorityConfig = useCallback(async () => {
     const success = await userPreferences.resetSortingPriorityConfig()
     if (success) {
@@ -951,6 +994,11 @@ export const UserPreferencesProvider = ({
     claudeCodeRouterBaseUrl: preferences?.claudeCodeRouter?.baseUrl || "",
     claudeCodeRouterApiKey: preferences?.claudeCodeRouter?.apiKey || "",
     themeMode: preferences?.themeMode || "system",
+    loggingConsoleEnabled:
+      preferences?.logging?.consoleEnabled ??
+      DEFAULT_PREFERENCES.logging.consoleEnabled,
+    loggingLevel:
+      preferences?.logging?.level ?? DEFAULT_PREFERENCES.logging.level,
     tempWindowFallback:
       preferences.tempWindowFallback ??
       (DEFAULT_PREFERENCES.tempWindowFallback as TempWindowFallbackPreferences),
@@ -979,6 +1027,8 @@ export const UserPreferencesProvider = ({
     updateClaudeCodeRouterBaseUrl,
     updateClaudeCodeRouterApiKey,
     updateThemeMode,
+    updateLoggingConsoleEnabled,
+    updateLoggingLevel,
     updateAutoCheckin,
     updateNewApiModelSync,
     updateModelRedirect,
@@ -998,6 +1048,7 @@ export const UserPreferencesProvider = ({
     resetModelRedirectConfig,
     resetWebdavConfig,
     resetThemeAndLanguage,
+    resetLoggingSettings,
     resetSortingPriorityConfig,
     loadPreferences,
   }

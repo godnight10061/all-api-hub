@@ -8,6 +8,7 @@ import {
   CURRENT_PREFERENCES_VERSION,
   migratePreferences,
 } from "~/services/configMigration/preferences/preferencesMigration"
+import { USER_PREFERENCES_STORAGE_KEYS } from "~/services/storageKeys"
 import { CurrencyType, DashboardTabType, SortField, SortOrder } from "~/types"
 import {
   AccountAutoRefresh,
@@ -27,12 +28,20 @@ import {
   type CliProxyConfig,
 } from "~/types/cliProxyConfig"
 import {
+  getDefaultLoggingPreferences,
+  type LoggingPreferences,
+} from "~/types/logging"
+import {
   DEFAULT_MODEL_REDIRECT_PREFERENCES,
   type ModelRedirectPreferences,
 } from "~/types/managedSiteModelRedirect"
 import { DEFAULT_NEW_API_CONFIG, NewApiConfig } from "~/types/newApiConfig"
 import type { SortingPriorityConfig } from "~/types/sorting"
 import type { ThemeMode } from "~/types/theme"
+import {
+  DEFAULT_USAGE_HISTORY_PREFERENCES,
+  type UsageHistoryPreferences,
+} from "~/types/usageHistory"
 import { DeepPartial } from "~/types/utils"
 import { DEFAULT_VELOERA_CONFIG, VeloeraConfig } from "~/types/veloeraConfig"
 import {
@@ -41,7 +50,10 @@ import {
   WebDAVSyncStrategy,
 } from "~/types/webdav"
 import { deepOverride } from "~/utils"
+import { createLogger } from "~/utils/logger"
 import { DEFAULT_SORTING_PRIORITY_CONFIG } from "~/utils/sortingPriority"
+
+const logger = createLogger("UserPreferences")
 
 export interface TempWindowFallbackPreferences {
   enabled: boolean
@@ -107,6 +119,14 @@ export interface UserPreferences {
    */
   language?: string
 
+  /**
+   * Console logging configuration shared across all extension contexts.
+   *
+   * When `consoleEnabled` is disabled, no logs are emitted at any level
+   * (including `error`).
+   */
+  logging: LoggingPreferences
+
   // BalanceSection 相关配置
   /**
    * 金额标签页状态
@@ -129,6 +149,9 @@ export interface UserPreferences {
 
   // 自动刷新相关配置
   accountAutoRefresh: AccountAutoRefresh
+
+  // Usage history sync + analytics
+  usageHistory?: UsageHistoryPreferences
 
   // 是否显示健康状态
   showHealthStatus: boolean
@@ -288,11 +311,6 @@ export interface UserPreferences {
   webdavSyncStrategy?: WebDAVSyncStrategy
 }
 
-// 存储键名常量
-const STORAGE_KEYS = {
-  USER_PREFERENCES: "user_preferences",
-} as const
-
 // 默认配置
 export const DEFAULT_PREFERENCES: UserPreferences = {
   activeTab: DATA_TYPE_CASHFLOW,
@@ -301,6 +319,7 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
   sortOrder: "desc", // 与 UI_CONSTANTS.SORT.DEFAULT_ORDER 保持一致
   actionClickBehavior: "popup",
   accountAutoRefresh: DEFAULT_ACCOUNT_AUTO_REFRESH,
+  usageHistory: DEFAULT_USAGE_HISTORY_PREFERENCES,
   showHealthStatus: true, // 默认显示健康状态
   webdav: DEFAULT_WEBDAV_SETTINGS,
   lastUpdated: Date.now(),
@@ -323,6 +342,7 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
   },
   autoCheckin: {
     globalEnabled: true,
+    pretriggerDailyOnUiOpen: false,
     windowStart: "09:00",
     windowEnd: "23:00",
     scheduleMode: AUTO_CHECKIN_SCHEDULE_MODE.RANDOM,
@@ -347,6 +367,7 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
   sortingPriorityConfig: undefined,
   themeMode: "system",
   language: undefined, // Default to undefined to trigger browser detection
+  logging: getDefaultLoggingPreferences(),
   preferencesVersion: CURRENT_PREFERENCES_VERSION,
   tempWindowFallback: {
     enabled: true,
@@ -378,7 +399,7 @@ class UserPreferencesService {
   async getPreferences(): Promise<UserPreferences> {
     try {
       const storedPreferences = (await this.storage.get(
-        STORAGE_KEYS.USER_PREFERENCES,
+        USER_PREFERENCES_STORAGE_KEYS.USER_PREFERENCES,
       )) as UserPreferences | undefined
       const preferences = storedPreferences || DEFAULT_PREFERENCES
 
@@ -392,12 +413,15 @@ class UserPreferencesService {
 
       // If migration changed preferences, save the updated version
       if (!isEqual(finalPreferences, storedPreferences)) {
-        await this.storage.set(STORAGE_KEYS.USER_PREFERENCES, finalPreferences)
+        await this.storage.set(
+          USER_PREFERENCES_STORAGE_KEYS.USER_PREFERENCES,
+          finalPreferences,
+        )
       }
 
       return finalPreferences
     } catch (error) {
-      console.error("获取用户偏好设置失败:", error)
+      logger.error("获取用户偏好设置失败", error)
       return DEFAULT_PREFERENCES
     }
   }
@@ -420,11 +444,17 @@ class UserPreferencesService {
         },
       )
 
-      await this.storage.set(STORAGE_KEYS.USER_PREFERENCES, updatedPreferences)
-      console.log("[UserPreferences] 偏好设置保存成功:", updatedPreferences)
+      await this.storage.set(
+        USER_PREFERENCES_STORAGE_KEYS.USER_PREFERENCES,
+        updatedPreferences,
+      )
+      logger.debug("偏好设置保存成功", {
+        lastUpdated: updatedPreferences.lastUpdated,
+        preferencesVersion: updatedPreferences.preferencesVersion,
+      })
       return true
     } catch (error) {
-      console.error("[UserPreferences] 保存偏好设置失败:", error)
+      logger.error("保存偏好设置失败", error)
       return false
     }
   }
@@ -493,11 +523,14 @@ class UserPreferencesService {
    */
   async resetToDefaults(): Promise<boolean> {
     try {
-      await this.storage.set(STORAGE_KEYS.USER_PREFERENCES, DEFAULT_PREFERENCES)
-      console.log("[UserPreferences] 已重置为默认设置")
+      await this.storage.set(
+        USER_PREFERENCES_STORAGE_KEYS.USER_PREFERENCES,
+        DEFAULT_PREFERENCES,
+      )
+      logger.info("已重置为默认设置")
       return true
     } catch (error) {
-      console.error("[UserPreferences] 重置设置失败:", error)
+      logger.error("重置设置失败", error)
       return false
     }
   }
@@ -507,11 +540,11 @@ class UserPreferencesService {
    */
   async clearPreferences(): Promise<boolean> {
     try {
-      await this.storage.remove(STORAGE_KEYS.USER_PREFERENCES)
-      console.log("[UserPreferences] 偏好设置已清空")
+      await this.storage.remove(USER_PREFERENCES_STORAGE_KEYS.USER_PREFERENCES)
+      logger.info("偏好设置已清空")
       return true
     } catch (error) {
-      console.error("[UserPreferences] 清空偏好设置失败:", error)
+      logger.error("清空偏好设置失败", error)
       return false
     }
   }
@@ -545,17 +578,17 @@ class UserPreferencesService {
         ? await this.getPreferences()
         : null
 
-      await this.storage.set(STORAGE_KEYS.USER_PREFERENCES, {
+      await this.storage.set(USER_PREFERENCES_STORAGE_KEYS.USER_PREFERENCES, {
         ...migratedPreferences,
         ...(options?.preserveWebdav && currentPreferences
           ? { webdav: currentPreferences.webdav }
           : null),
         lastUpdated: Date.now(),
       })
-      console.log("[UserPreferences] 偏好设置导入成功，已迁移至最新版本")
+      logger.info("偏好设置导入成功，已迁移至最新版本")
       return true
     } catch (error) {
-      console.error("[UserPreferences] 导入偏好设置失败:", error)
+      logger.error("导入偏好设置失败", error)
       return false
     }
   }
@@ -593,6 +626,23 @@ class UserPreferencesService {
    */
   async setLanguage(language: string): Promise<boolean> {
     return this.savePreferences({ language })
+  }
+
+  /**
+   * Get logging preferences (console enablement + minimum level).
+   */
+  async getLoggingPreferences(): Promise<LoggingPreferences> {
+    const preferences = await this.getPreferences()
+    return preferences.logging
+  }
+
+  /**
+   * Update logging preferences (deep merge).
+   */
+  async updateLoggingPreferences(
+    updates: Partial<LoggingPreferences>,
+  ): Promise<boolean> {
+    return this.savePreferences({ logging: updates })
   }
 
   /**

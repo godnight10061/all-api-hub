@@ -1,5 +1,6 @@
 import { t } from "i18next"
 
+import { RuntimeActionIds } from "~/constants/runtimeActions"
 import { getSiteApiRouter } from "~/constants/siteType"
 import { accountStorage } from "~/services/accountStorage"
 import { redeemService } from "~/services/redeemService"
@@ -7,6 +8,7 @@ import { searchAccounts } from "~/services/search/accountSearch"
 import { userPreferences } from "~/services/userPreferences"
 import type { DisplaySiteData } from "~/types"
 import { getErrorMessage } from "~/utils/error"
+import { createLogger } from "~/utils/logger"
 import { isPossibleRedemptionCode } from "~/utils/redemptionAssist"
 import {
   buildOriginWhitelistPattern,
@@ -14,6 +16,11 @@ import {
   isUrlAllowedByRegexList,
 } from "~/utils/redemptionAssistWhitelist"
 import { joinUrl } from "~/utils/url"
+
+/**
+ * Unified logger scoped to the redemption assist background service.
+ */
+const logger = createLogger("RedemptionAssist")
 
 interface RedemptionAssistRuntimeSettings {
   enabled: boolean
@@ -27,16 +34,16 @@ interface RedemptionAssistRuntimeSettings {
 }
 
 /**
- * Request payload for redemptionAssist:shouldPrompt runtime messages.
+ * Request payload for `RuntimeActionIds.RedemptionAssistShouldPrompt` runtime messages.
  */
 export type RedemptionAssistShouldPromptRequest = {
-  action: "redemptionAssist:shouldPrompt"
+  action: typeof RuntimeActionIds.RedemptionAssistShouldPrompt
   url: string
   codes: string[]
 }
 
 /**
- * Response payload for redemptionAssist:shouldPrompt runtime messages.
+ * Response payload for `RuntimeActionIds.RedemptionAssistShouldPrompt` runtime messages.
  */
 export type RedemptionAssistShouldPromptResponse =
   | {
@@ -89,11 +96,11 @@ class RedemptionAssistService {
         this.settings.urlWhitelist = prefs.redemptionAssist.urlWhitelist
       }
     } catch (error) {
-      console.warn("[RedemptionAssist] Failed to load preferences:", error)
+      logger.warn("Failed to load preferences", error)
     }
 
     this.initialized = true
-    console.log("[RedemptionAssist] Service initialized", this.settings)
+    logger.info("Service initialized", this.settings)
   }
 
   /**
@@ -132,7 +139,7 @@ class RedemptionAssistService {
     }
     this.settings = next
     this.derivedPatternsCache = null
-    console.log("[RedemptionAssist] Runtime settings updated", this.settings)
+    logger.info("Runtime settings updated", this.settings)
   }
 
   /**
@@ -447,13 +454,13 @@ export const handleRedemptionAssistMessage = async (
 ) => {
   try {
     switch (request.action) {
-      case "redemptionAssist:updateSettings": {
+      case RuntimeActionIds.RedemptionAssistUpdateSettings: {
         redemptionAssistService.updateRuntimeSettings(request.settings || {})
         sendResponse({ success: true })
         break
       }
 
-      case "redemptionAssist:shouldPrompt": {
+      case RuntimeActionIds.RedemptionAssistShouldPrompt: {
         const { url, codes } = request
         if (!url || !Array.isArray(codes) || codes.length === 0) {
           sendResponse({ success: false, error: "Missing url or codes" })
@@ -473,7 +480,7 @@ export const handleRedemptionAssistMessage = async (
         break
       }
 
-      case "redemptionAssist:autoRedeem": {
+      case RuntimeActionIds.RedemptionAssistAutoRedeem: {
         const { accountId, code } = request
         if (!accountId || !code) {
           sendResponse({ success: false, error: "Missing accountId or code" })
@@ -484,7 +491,7 @@ export const handleRedemptionAssistMessage = async (
         break
       }
 
-      case "redemptionAssist:autoRedeemByUrl": {
+      case RuntimeActionIds.RedemptionAssistAutoRedeemByUrl: {
         const { url, code } = request
         if (!url || !code) {
           sendResponse({ success: false, error: "Missing url or code" })
@@ -499,7 +506,7 @@ export const handleRedemptionAssistMessage = async (
         sendResponse({ success: false, error: "Unknown action" })
     }
   } catch (error) {
-    console.error("[RedemptionAssist] Message handling failed:", error)
+    logger.error("Message handling failed", error)
     sendResponse({ success: false, error: getErrorMessage(error) })
   }
 }

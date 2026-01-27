@@ -1,5 +1,6 @@
 import { t } from "i18next"
 
+import { RuntimeActionIds } from "~/constants/runtimeActions"
 import { ModelRedirectService } from "~/services/modelRedirect"
 import type { ChannelModelFilterRule } from "~/types/channelModelFilters"
 import type { ManagedSiteChannel } from "~/types/managedSite"
@@ -19,6 +20,7 @@ import {
   onAlarm,
 } from "~/utils/browserApi"
 import { getErrorMessage } from "~/utils/error"
+import { createLogger } from "~/utils/logger"
 import {
   getManagedSiteAdminConfig,
   getManagedSiteContext,
@@ -29,6 +31,8 @@ import { DEFAULT_PREFERENCES, userPreferences } from "../userPreferences"
 import { collectModelsFromExecution } from "./modelCollection"
 import { ModelSyncService } from "./modelSyncService"
 import { managedSiteModelSyncStorage } from "./storage"
+
+const logger = createLogger("ManagedSiteModelSync")
 
 /**
  * Scheduler for New API Model Sync.
@@ -82,7 +86,7 @@ class ModelSyncScheduler {
    */
   async initialize() {
     if (this.isInitialized) {
-      console.log("[ManagedSiteModelSync] Scheduler already initialized")
+      logger.debug("Scheduler already initialized")
       return
     }
 
@@ -92,10 +96,7 @@ class ModelSyncScheduler {
         onAlarm((alarm) => {
           if (alarm.name === ModelSyncScheduler.ALARM_NAME) {
             this.executeSync().catch((error) => {
-              console.error(
-                "[ManagedSiteModelSync] Scheduled execution failed:",
-                error,
-              )
+              logger.error("Scheduled execution failed", error)
             })
           }
         })
@@ -103,18 +104,13 @@ class ModelSyncScheduler {
         // Setup initial alarm based on preferences
         await this.setupAlarm()
       } else {
-        console.warn(
-          "[ManagedSiteModelSync] Alarms API not available, automatic sync disabled",
-        )
+        logger.warn("Alarms API not available, automatic sync disabled")
       }
 
       this.isInitialized = true
-      console.log("[ManagedSiteModelSync] Scheduler initialized")
+      logger.info("Scheduler initialized")
     } catch (error) {
-      console.error(
-        "[ManagedSiteModelSync] Failed to initialize scheduler:",
-        error,
-      )
+      logger.error("Failed to initialize scheduler", error)
     }
   }
 
@@ -129,9 +125,7 @@ class ModelSyncScheduler {
   async setupAlarm() {
     // Check if alarms API is supported
     if (!hasAlarmsAPI()) {
-      console.warn(
-        "[ManagedSiteModelSync] Alarms API not supported, auto-sync disabled",
-      )
+      logger.warn("Alarms API not supported, auto-sync disabled")
       return
     }
 
@@ -141,7 +135,7 @@ class ModelSyncScheduler {
 
     if (!config.enabled) {
       await clearAlarm(ModelSyncScheduler.ALARM_NAME)
-      console.log("[ManagedSiteModelSync] Auto-sync disabled, alarm cleared")
+      logger.info("Auto-sync disabled; alarm cleared")
       return
     }
 
@@ -157,16 +151,13 @@ class ModelSyncScheduler {
         existingPeriodInMinutes != null &&
         Math.abs(existingPeriodInMinutes - intervalInMinutes) < 0.001
       ) {
-        console.log(
-          "[ManagedSiteModelSync] Alarm already exists, preserving:",
-          {
-            name: existingAlarm.name,
-            scheduledTime: existingAlarm.scheduledTime
-              ? new Date(existingAlarm.scheduledTime)
-              : null,
-            periodInMinutes: existingPeriodInMinutes,
-          },
-        )
+        logger.debug("Alarm already exists; preserving", {
+          name: existingAlarm.name,
+          scheduledTime: existingAlarm.scheduledTime
+            ? new Date(existingAlarm.scheduledTime)
+            : null,
+          periodInMinutes: existingPeriodInMinutes,
+        })
         return
       }
 
@@ -179,7 +170,7 @@ class ModelSyncScheduler {
       // Verify alarm was created
       const alarm = await getAlarm(ModelSyncScheduler.ALARM_NAME)
       if (alarm) {
-        console.log(`[ManagedSiteModelSync] Alarm set successfully:`, {
+        logger.info("Alarm set successfully", {
           name: alarm.name,
           scheduledTime: alarm.scheduledTime
             ? new Date(alarm.scheduledTime)
@@ -187,10 +178,10 @@ class ModelSyncScheduler {
           periodInMinutes: alarm.periodInMinutes,
         })
       } else {
-        console.warn("[ManagedSiteModelSync] Alarm was not created properly")
+        logger.warn("Alarm was not created properly")
       }
     } catch (error) {
-      console.error("[ManagedSiteModelSync] Failed to create alarm:", error)
+      logger.error("Failed to create alarm", error)
     }
   }
 
@@ -206,7 +197,7 @@ class ModelSyncScheduler {
    * @returns ExecutionResult with per-channel outcomes and statistics.
    */
   async executeSync(channelIds?: number[]): Promise<ExecutionResult> {
-    console.log("[ManagedSiteModelSync] Starting execution")
+    logger.info("Starting execution")
 
     // Initialize service
     const service = await this.createService()
@@ -273,9 +264,9 @@ class ModelSyncScheduler {
                   (c) => c.id === payload.lastResult.channelId,
                 )
                 if (!channel) {
-                  console.warn(
-                    `[ManagedSiteModelSync] Channel ${payload.lastResult.channelId} not found`,
-                  )
+                  logger.warn("Channel not found", {
+                    channelId: payload.lastResult.channelId,
+                  })
                 } else {
                   const actualModels = payload.lastResult.newModels || []
 
@@ -292,15 +283,18 @@ class ModelSyncScheduler {
                     service,
                   )
                   mappingSuccessCount++
-                  console.log(
-                    `[ManagedSiteModelSync] Applied ${Object.keys(newMapping).length} model redirects to channel ${channel.name}`,
-                  )
+                  logger.info("Applied model redirects to channel", {
+                    channelId: channel.id,
+                    channelName: channel.name,
+                    mappingCount: Object.keys(newMapping).length,
+                  })
                 }
               } catch (error) {
-                console.error(
-                  `[ManagedSiteModelSync] Failed to apply mapping for channel ${payload.lastResult.channelName}:`,
+                logger.error("Failed to apply mapping for channel", {
+                  channelId: payload.lastResult.channelId,
+                  channelName: payload.lastResult.channelName,
                   error,
-                )
+                })
                 mappingErrorCount++
               }
             }
@@ -329,15 +323,17 @@ class ModelSyncScheduler {
         }
       }
 
-      console.log(
-        `[ManagedSiteModelSync] Execution completed: ${result.statistics.successCount}/${result.statistics.total} succeeded`,
-      )
+      logger.info("Execution completed", {
+        successCount: result.statistics.successCount,
+        total: result.statistics.total,
+      })
 
       // Log model redirect mapping results
       if (modelRedirectConfig.enabled && standardModels.length > 0) {
-        console.log(
-          `[ManagedSiteModelSync] Model redirect mappings applied: ${mappingSuccessCount} succeeded, ${mappingErrorCount} failed`,
-        )
+        logger.info("Model redirect mappings applied", {
+          succeeded: mappingSuccessCount,
+          failed: mappingErrorCount,
+        })
       }
 
       return result
@@ -440,7 +436,7 @@ class ModelSyncScheduler {
 
     await userPreferences.savePreferences({ managedSiteModelSync: updated })
     await this.setupAlarm()
-    console.log("[ManagedSiteModelSync] Settings updated:", updated)
+    logger.info("Settings updated", updated)
   }
 
   /**
@@ -476,7 +472,7 @@ export const handleManagedSiteModelSyncMessage = async (
 ) => {
   try {
     switch (request.action) {
-      case "modelSync:getNextRun": {
+      case RuntimeActionIds.ModelSyncGetNextRun: {
         const alarm = await getAlarm(ModelSyncScheduler.ALARM_NAME)
         const nextScheduledAt =
           alarm?.scheduledTime != null
@@ -493,13 +489,13 @@ export const handleManagedSiteModelSyncMessage = async (
         break
       }
 
-      case "modelSync:triggerAll": {
+      case RuntimeActionIds.ModelSyncTriggerAll: {
         const resultAll = await modelSyncScheduler.executeSync()
         sendResponse({ success: true, data: resultAll })
         break
       }
 
-      case "modelSync:triggerSelected": {
+      case RuntimeActionIds.ModelSyncTriggerSelected: {
         const resultSelected = await modelSyncScheduler.executeSync(
           request.channelIds,
         )
@@ -507,44 +503,44 @@ export const handleManagedSiteModelSyncMessage = async (
         break
       }
 
-      case "modelSync:triggerFailedOnly": {
+      case RuntimeActionIds.ModelSyncTriggerFailedOnly: {
         const resultFailed = await modelSyncScheduler.executeFailedOnly()
         sendResponse({ success: true, data: resultFailed })
         break
       }
 
-      case "modelSync:getLastExecution": {
+      case RuntimeActionIds.ModelSyncGetLastExecution: {
         const lastExecution =
           await managedSiteModelSyncStorage.getLastExecution()
         sendResponse({ success: true, data: lastExecution })
         break
       }
 
-      case "modelSync:getProgress": {
+      case RuntimeActionIds.ModelSyncGetProgress: {
         const progress = modelSyncScheduler.getProgress()
         sendResponse({ success: true, data: progress })
         break
       }
 
-      case "modelSync:updateSettings":
+      case RuntimeActionIds.ModelSyncUpdateSettings:
         await modelSyncScheduler.updateSettings(request.settings)
         sendResponse({ success: true })
         break
 
-      case "modelSync:getPreferences": {
+      case RuntimeActionIds.ModelSyncGetPreferences: {
         const prefs = await managedSiteModelSyncStorage.getPreferences()
         sendResponse({ success: true, data: prefs })
         break
       }
 
-      case "modelSync:getChannelUpstreamModelOptions": {
+      case RuntimeActionIds.ModelSyncGetChannelUpstreamModelOptions: {
         const upstreamOptions =
           await managedSiteModelSyncStorage.getChannelUpstreamModelOptions()
         sendResponse({ success: true, data: upstreamOptions })
         break
       }
 
-      case "modelSync:listChannels": {
+      case RuntimeActionIds.ModelSyncListChannels: {
         const channels = await modelSyncScheduler.listChannels()
         sendResponse({ success: true, data: channels })
         break
@@ -554,7 +550,7 @@ export const handleManagedSiteModelSyncMessage = async (
         sendResponse({ success: false, error: "Unknown action" })
     }
   } catch (error) {
-    console.error("[ManagedSiteModelSync] Message handling failed:", error)
+    logger.error("Message handling failed", error)
     sendResponse({ success: false, error: getErrorMessage(error) })
   }
 }
